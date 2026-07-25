@@ -1,0 +1,511 @@
+#EKSjob
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Harsha6404/devsecops-netflix.git'
+            }
+        }
+
+        stage('Terraform version') {
+            steps {
+                sh 'terraform --version'
+            }
+        }
+
+        stage('Terraform init') {
+            steps {
+                dir('EKS_TERRAFORM') {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform validate') {
+            steps {
+                dir('EKS_TERRAFORM') {
+                    sh 'terraform validate'
+                }
+            }
+        }
+
+        stage('Terraform plan') {
+            steps {
+                dir('EKS_TERRAFORM') {
+                    sh 'terraform plan'
+                }
+            }
+        }
+
+        stage('Terraform apply/destroy') {
+            steps {
+                dir('EKS_TERRAFORM') {
+                    sh "terraform ${params.action} --auto-approve"
+                }
+            }
+        }
+    }
+}
+---------------------------------------------------
+#final pipeline 
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk24'
+        nodejs 'node24'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Harsha6404/devsecops-netflix.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=netflix \
+                        -Dsonar.projectKey=netflix
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+
+                        sh '''
+                        docker build \
+                        --build-arg TMDB_V3_API_KEY=66f4c5ce947495e68c32f6da534f78ed \
+                        -t netflix .
+                        '''
+
+                        sh 'docker tag netflix hzrshz/netflix:latest'
+
+                        sh 'docker push hzrshz/netflix:latest'
+                    }
+                }
+            }
+        }
+
+        stage('TRIVY IMAGE SCAN') {
+            steps {
+                sh 'trivy image hzrshz/netflix:latest > trivyimage.txt'
+            }
+        }
+
+        stage('Deploy Docker Container') {
+            steps {
+                sh '''
+                docker rm -f netflix || true
+                docker run -d --name netflix -p 3001:80 hzrshz/netflix:latest
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                dir('Kubernetes') {
+                    withKubeConfig(
+                        credentialsId: 'k8s'
+                    ) {
+                        sh 'kubectl apply -f deployment.yml'
+                        sh 'kubectl apply -f service.yml'
+                    }
+                }
+            }
+        }
+    }
+}
+---------------------------------------------------
+# script1
+#!/bin/bash
+
+# Install Terraform
+sudo apt install wget -y
+
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+sudo apt update && sudo apt install terraform
+
+# Install kubectl on Jenkins
+sudo apt update
+sudo apt install curl -y
+
+curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+kubectl version --client
+
+# Install AWS CLI
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+
+sudo apt-get install unzip -y
+
+unzip awscliv2.zip
+
+sudo ./aws/install
+--------------------------------------------------
+# Install Java (Temurin JDK 21)
+sudo apt update
+sudo apt install fontconfig openjdk-21-jre
+java -version
+
+# Install Jenkins
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
+  https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]" \
+  https://pkg.jenkins.io/debian-stable binary/ | sudo tee \
+  /etc/apt/sources.list.d/jenkins.list > /dev/null
+sudo apt update
+sudo apt install jenkins
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+sudo systemctl status jenkins
+
+# Install Docker
+
+# Add Docker's official GPG key:
+sudo apt-get update
+
+sudo apt-get install ca-certificates curl gnupg -y
+
+sudo install -m 0755 -d /etc/apt/keyrings
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+
+sudo usermod -aG docker ubuntu
+
+newgrp docker
+-------------------------------------------------
+#trivy installation
+
+#!/bin/bash
+
+# Install Trivy
+
+sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+| gpg --dearmor \
+| sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+
+echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+| sudo tee -a /etc/apt/sources.list.d/trivy.list
+
+sudo apt-get update
+
+sudo apt-get install trivy -y
+------------------------------------
+# prometheous installation
+
+#!/bin/bash
+
+# Update packages
+sudo apt update
+
+# Create Prometheus system user
+sudo useradd --system --no-create-home --shell /bin/false prometheus
+
+# Download Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.1/prometheus-2.47.1.linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvf prometheus-2.47.1.linux-amd64.tar.gz
+
+# Create required directories
+sudo mkdir -p /data /etc/prometheus
+
+# Enter extracted directory
+cd prometheus-2.47.1.linux-amd64/
+
+# Copy binaries
+sudo mv prometheus promtool /usr/local/bin/
+
+# Copy console files
+sudo mv consoles/ console_libraries/ /etc/prometheus/
+
+# Copy configuration file
+sudo mv prometheus.yml /etc/prometheus/prometheus.yml
+
+# Set ownership
+sudo chown -R prometheus:prometheus /etc/prometheus/ /data/
+
+# Return to previous directory
+cd ..
+
+# Remove downloaded archive
+rm -rf prometheus-2.47.1.linux-amd64.tar.gz
+
+# Verify installation
+prometheus --version
+--------------
+sudo vi /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+Restart=on-failure
+RestartSec=5s
+
+ExecStart=/usr/local/bin/prometheus \
+    --config.file=/etc/prometheus/prometheus.yml \
+    --storage.tsdb.path=/data \
+    --web.console.templates=/etc/prometheus/consoles \
+    --web.console.libraries=/etc/prometheus/console_libraries \
+    --web.listen-address=0.0.0.0:9090 \
+    --web.enable-lifecycle
+
+[Install]
+WantedBy=multi-user.target
+---------------------------------------
+sudo systemctl daemon-reload
+
+sudo systemctl enable prometheus
+
+sudo systemctl start prometheus
+
+sudo systemctl status prometheus
+
+---------------------
+#!/bin/bash
+
+# Create node_exporter user
+sudo useradd --system --no-create-home --shell /bin/false node_exporter
+
+# Download Node Exporter
+wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvf node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Move binary
+sudo mv node_exporter-1.6.1.linux-amd64/node_exporter /usr/local/bin/
+
+# Clean up
+rm -rf node_exporter*
+
+# Verify installation
+node_exporter --version
+--------------------------------
+sudo vi /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+Restart=on-failure
+RestartSec=5s
+
+ExecStart=/usr/local/bin/node_exporter \
+    --collector.logind
+
+[Install]
+WantedBy=multi-user.target
+-----------------------------------------------------------
+sudo systemctl daemon-reload
+
+sudo systemctl enable node_exporter
+
+sudo systemctl start node_exporter
+
+sudo systemctl status node_exporter
+------------------------------------------------
+#!/bin/bash
+
+# Install Grafana
+
+sudo apt-get install -y apt-transport-https software-properties-common
+
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+
+echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+
+sudo apt-get update
+
+sudo apt-get -y install grafana
+
+sudo systemctl enable grafana-server
+
+sudo systemctl start grafana-server
+
+sudo systemctl status grafana-server
+=============================OR _______________________-
+#!/bin/bash
+
+set -e
+
+sudo apt update
+sudo apt install -y wget gpg apt-transport-https software-properties-common
+
+sudo mkdir -p /etc/apt/keyrings
+
+wget -q -O - https://apt.grafana.com/gpg.key | \
+gpg --dearmor | \
+sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | \
+sudo tee /etc/apt/sources.list.d/grafana.list
+
+sudo apt update
+
+sudo apt install -y grafana
+
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+
+sudo systemctl status grafana-server --no-pager
+--------------------------------------------------
+sudo vi /etc/prometheus/prometheus.yml
+- job_name: 'jenkins'
+  metrics_path: '/prometheus'
+  static_configs:
+    - targets: ['<jenkins-ip>:8080']
+------------------------
+promtool check config /etc/prometheus/prometheus.yml
+sudo systemctl restart prometheus
+------------------
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk24'
+        nodejs 'node24'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+
+        stage('clean workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/ReyazShaik/devsecops-netflix.git'
+            }
+        }
+
+        stage('Sonarqube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=netflix \
+                        -Dsonar.projectKey=netflix
+                    '''
+                }
+            }
+        }
+
+        stage('quality gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+    }
+
+    post {
+        always {
+            emailext(
+                attachLog: true,
+                subject: "${currentBuild.result}",
+                body: "Project: ${env.JOB_NAME}<br/>" +
+                      "Build Number: ${env.BUILD_NUMBER}<br/>" +
+                      "URL: ${env.BUILD_URL}<br/>",
+                to: 'trainerreyaz@gmail.com',
+                attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+            )
+        }
+    }
+}
+-----------------------------------------------
+sudo chmod 777 /var/run/docker.sock
+
+sudo systemctl daemon-reload
+
+sudo systemctl restart docker.service
+
+
