@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Create node_exporter user
+sudo useradd --system --no-create-home --shell /bin/false node_exporter
+
+# Download Node Exporter
+wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvf node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Move binary
+sudo mv node_exporter-1.6.1.linux-amd64/node_exporter /usr/local/bin/
+
+# Clean up
+rm -rf node_exporter*
+
+# Verify installation
+node_exporter --version
