@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk24'
+        nodejs 'node24'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Harsha6404/devsecops-2048.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                    $SCANNER_HOME/bin/sonar-scanner \
+                    -Dsonar.projectName=Game \
+                    -Dsonar.projectKey=Game
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+
+                        sh 'docker build -t 2048 .'
+
+                        sh 'docker tag 2048 hzrshz/2048:latest'
+
+                        sh 'docker push hzrshz/2048:latest'
+                    }
+                }
+            }
+        }
+
+        stage('TRIVY IMAGE SCAN') {
+            steps {
+                sh 'trivy image hzrshz/2048:latest > trivy.txt'
+            }
+        }
+
+        stage('Deploy to Container') {
+            steps {
+                sh '''
+                docker rm -f 2048 || true
+                docker run -d --name 2048 -p 3000:3000 hzrshz/2048:latest
+                '''
+            }
+        }
+        stage('Deploy to kubernetes') {
+    steps {
+        script {
+            withKubeConfig(
+                credentialsId: 'k8s',
+                caCertificate: '',
+                clusterName: '',
+                contextName: '',
+                namespace: '',
+                restrictKubeConfigAccess: false,
+                serverUrl: ''
+            ) {
+                sh 'kubectl apply -f deployment.yml'
+            }
+        }
+    }
+}
+        
+    }
+}
