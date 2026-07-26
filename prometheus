@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Update packages
+sudo apt update
+
+# Create Prometheus system user
+sudo useradd --system --no-create-home --shell /bin/false prometheus
+
+# Download Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.1/prometheus-2.47.1.linux-amd64.tar.gz
+
+# Extract the archive
+tar -xvf prometheus-2.47.1.linux-amd64.tar.gz
+
+# Create required directories
+sudo mkdir -p /data /etc/prometheus
+
+# Enter extracted directory
+cd prometheus-2.47.1.linux-amd64/
+
+# Copy binaries
+sudo mv prometheus promtool /usr/local/bin/
+
+# Copy console files
+sudo mv consoles/ console_libraries/ /etc/prometheus/
+
+# Copy configuration file
+sudo mv prometheus.yml /etc/prometheus/prometheus.yml
+
+# Set ownership
+sudo chown -R prometheus:prometheus /etc/prometheus/ /data/
+
+# Return to previous directory
+cd ..
+
+# Remove downloaded archive
+rm -rf prometheus-2.47.1.linux-amd64.tar.gz
+
+# Verify installation
+prometheus --version
