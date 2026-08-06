@@ -1,0 +1,83 @@
+#1. Install Helm
+
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 get_helm.sh
+./get_helm.sh
+helm version
+
+#2. Install Metrics Server
+
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+
+#3. Add Helm Repositories
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+
+#4. Update Helm Repositories
+
+helm repo update
+helm repo list
+
+#5. Create Prometheus Namespace
+
+kubectl get ns
+kubectl create namespace prometheus
+kubectl get ns
+
+6. Install Prometheus
+
+helm install prometheus prometheus-community/prometheus \
+--namespace prometheus \
+--set alertmanager.persistentVolume.storageClass="gp2" \
+--set server.persistentVolume.storageClass="gp2"
+
+#Check the deployment:
+kubectl get pods -n prometheus
+kubectl get all -n prometheus
+
+#7. Create Grafana Namespace
+kubectl create namespace grafana
+
+#8. Install Grafana
+
+helm install grafana grafana/grafana \
+--namespace grafana \
+--set persistence.storageClassName="gp2" \
+--set persistence.enabled=true \
+--set adminPassword='Root123456' \
+--set service.type=LoadBalancer
+
+#Check Grafana:
+kubectl get pods -n grafana
+kubectl get service -n grafana
+
+#9. Open Grafana
+Username: admin
+Password: Root123456
+
+#10. Add Prometheus Data Source
+http://prometheus-server.prometheus.svc.cluster.local/
+
+------------------------
+11. Grafana Dashboards
+https://grafana.com/grafana/dashboards/
+6417
+315
+
+new
+→ Import
+→ Enter Dashboard ID
+→ Load
+→ Select Prometheus
+→ Import
+
+12. Useful Dashboard IDs
+11454   -> PV and PVC
+747     -> Pod Metrics
+14623   -> Kubernetes Overview (recommended)
+10907   -> Monitor API Server
+
+#13. Start Grafana Service
+systemctl start grafana-server.service
+
