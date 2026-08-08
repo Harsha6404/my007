@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'ap-south-1'
+        AWS_ACCOUNT_ID = '914090059604'
+        ECR_REPO = 'mytomcat'
+        ECR_REGISTRY = '914090059604.dkr.ecr.ap-south-1.amazonaws.com'
+        IMAGE_NAME = 'mytomcat'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Git') {
+            steps {
+                git 'https://github.com/Harsha6404/hotstarby.git'
+            }
+        }
+
+        stage('Maven') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    docker build -t ${IMAGE_NAME}:latest .
+                '''
+            }
+        }
+
+        stage('ECR Login') {
+            steps {
+                sh '''
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                '''
+            }
+        }
+
+        stage('Tag Image') {
+            steps {
+                sh '''
+                    docker tag ${IMAGE_NAME}:latest \
+                    ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+
+                    docker tag ${IMAGE_NAME}:latest \
+                    ${ECR_REGISTRY}/${ECR_REPO}:latest
+                '''
+            }
+        }
+
+        stage('Push Image to ECR') {
+            steps {
+                sh '''
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                '''
+            }
+        }
+    }
+}
