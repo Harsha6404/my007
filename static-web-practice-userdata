@@ -7,6 +7,7 @@ systemctl enable httpd
 systemctl start httpd
 systemctl restart httpd
 sudo yum install -y https://s3.ap-south-1.amazonaws.com/amazon-ssm-ap-south-1/latest/linux_amd64/amazon-ssm-agent.rpm
+sudo systemctl restart httpd
 
 -------------------------------------------------------------------------------------------
 
@@ -22,3 +23,4 @@ systemctl enable httpd
 systemctl start httpd
 systemctl restart httpd
 sudo yum install -y https://s3.ap-south-1.amazonaws.com/amazon-ssm-ap-south-1/latest/linux_amd64/amazon-ssm-agent.rpm
+sudo systemctl restart httpd
